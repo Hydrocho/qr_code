@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR 코드의 원리</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+        }
+
+        .qr-grid {
+            display: grid;
+            grid-template-columns: repeat(21, 1fr);
+            gap: 1px;
+            
+            /* --- 수정된 부분 시작 --- */
+            width: 100%;
+            /* 너비 제한 로직:
+               1. 기본적으로 최대 500px까지 커짐
+               2. 단, 화면 높이(vh)의 55%를 넘지 않도록 제한 (min 함수 사용)
+               3. aspect-ratio가 1/1이므로, 너비가 제한되면 높이도 자동으로 제한되어 정사각형 유지
+            */
+            max-width: min(500px, 55vh);
+            aspect-ratio: 1/1; 
+            margin: 0 auto; /* 중앙 정렬 안전장치 */
+            /* --- 수정된 부분 끝 --- */
+
+            background-color: #f3f4f6;
+            padding: 2px;
+            border: 2px solid #e5e7eb;
+            box-sizing: border-box; /* 패딩 포함 크기 계산 */
+        }
+
+        .cell {
+            width: 100%;
+            height: 100%;
+            background-color: white;
+            transition: all 0.3s ease;
+        }
+
+        .cell.black { background-color: #000; }
+        .cell.white { background-color: #fff; }
+        
+        /* 구조별 하이라이트 색상 */
+        .cell.finder { background-color: #ef4444; } /* 빨강: 위치 검출 */
+        .cell.timing { background-color: #3b82f6; } /* 파랑: 타이밍 */
+        .cell.format { background-color: #f59e0b; } /* 주황: 포맷 정보 */
+        .cell.data { background-color: #10b981; }    /* 초록: 데이터 */
+        .cell.data.masked { background-color: #059669; } /* 진한 초록: 마스킹 된 데이터 */
+
+        /* 애니메이션 */
+        @keyframes popIn {
+            0% { transform: scale(0); }
+            100% { transform: scale(1); }
+        }
+        .animate-pop {
+            animation: popIn 0.3s ease-out forwards;
+        }
+        
+        /* 스크롤바 커스텀 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+
+        /* 패턴 아이콘 스타일 */
+        .pattern-icon {
+            display: inline-grid;
+            grid-template-columns: repeat(3, 1fr); /* 3x3 그리드 예시 */
+            gap: 1px;
+            width: 24px; /* 전체 아이콘 크기 */
+            height: 24px;
+            vertical-align: middle;
+            margin-right: 6px;
+            border: 1px solid #ddd;
+            flex-shrink: 0;
+            background-color: #f0f0f0;
+        }
+        .pattern-icon .dot {
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        .pattern-icon .dot.white {
+            background-color: #fff;
+        }
+        .pattern-icon.timing-pattern .dot:nth-child(odd) { background-color: #3b82f6; } /* 파랑 */
+        .pattern-icon.timing-pattern .dot:nth-child(even) { background-color: #fff; }
+
+        .pattern-icon.finder-pattern {
+            grid-template-columns: repeat(7, 1fr);
+            grid-template-rows: repeat(7, 1fr);
+            width: 30px;
+            height: 30px;
+        }
+        .pattern-icon.finder-pattern .dot { background-color: #ef4444; }
+        .pattern-icon.finder-pattern .dot.inner-white { background-color: #fff; }
+        .pattern-icon.finder-pattern .dot.center-black { background-color: #ef4444; } /* Finder 중심 */
+
+
+        /* 마스킹 패턴 아이콘 */
+        .pattern-icon.masking-pattern {
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(4, 1fr);
+            width: 28px;
+            height: 28px;
+        }
+        .pattern-icon.masking-pattern .dot:nth-child(even) { background-color: #059669; }
+        .pattern-icon.masking-pattern .dot:nth-child(odd) { background-color: #fff; }
+        .pattern-icon.masking-pattern .dot:nth-child(4n-2),
+        .pattern-icon.masking-pattern .dot:nth-child(4n-3) {
+             /* 짝수 행에서 짝수 열, 홀수 행에서 홀수 열 */
+        }
+        .pattern-icon.masking-pattern .dot:nth-child(1), .pattern-icon.masking-pattern .dot:nth-child(4),
+        .pattern-icon.masking-pattern .dot:nth-child(6), .pattern-icon.masking-pattern .dot:nth-child(7),
+        .pattern-icon.masking-pattern .dot:nth-child(10), .pattern-icon.masking-pattern .dot:nth-child(11),
+        .pattern-icon.masking-pattern .dot:nth-child(13), .pattern-icon.masking-pattern .dot:nth-child(16)
+        { background-color: #059669; }
+
+        .pattern-icon.masking-pattern .dot.white-mask { background-color: #fff; }
+        .pattern-icon.masking-pattern .dot.black-mask { background-color: #059669; }
+
+    </style>
+</head>
+<!-- 전체 높이 고정 및 스크롤 방지 (내부 스크롤 사용) -->
+<body class="bg-slate-50 text-slate-800 h-screen flex flex-col overflow-hidden">
+
+    <!-- 헤더 -->
+    <header class="bg-slate-900 text-white p-3 shadow-md flex-shrink-0 z-20">
+        <div class="container mx-auto flex justify-between items-center px-2">
+            <div>
+                <h1 class="text-lg font-bold flex items-center gap-2">
+                    <span class="text-2xl">🔳</span> 
+                    <span>QR 코드의 원리</span>
+                </h1>
+                <p class="text-[11px] text-slate-400 ml-9">제작 : 명인중학교 과학 동아리 리서처</p>
+            </div>
+            <span class="text-xs bg-slate-700 px-2 py-1 rounded text-slate-300">Version 1 (21x21)</span>
+        </div>
+    </header>
+
+    <!-- 메인 컨텐츠: 좌우 분할 레이아웃 -->
+    <main class="flex-grow flex flex-col md:flex-row overflow-hidden relative">
+        
+        <!-- 왼쪽: 컨트롤 패널 (사이드바) -->
+        <aside class="w-full md:w-[350px] lg:w-[400px] bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 shadow-xl md:shadow-none z-10">
+            <div class="p-6 space-y-8">
+                
+                <!-- 1. 학습 모드 -->
+                <div>
+                    <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 border-b pb-2">Step 1: 구조 이해하기</h2>
+                    <div class="space-y-3">
+                        <button onclick="simStep(0)" class="w-full text-left p-3 rounded-lg hover:bg-slate-100 border border-slate-100 transition flex justify-between items-center group">
+                            <span class="text-sm font-medium">1. 초기화 (Reset)</span>
+                            <span class="text-slate-400 group-hover:text-slate-600">↺</span>
+                        </button>
+                        
+                        <button onclick="simStep(1)" class="w-full text-left p-3 rounded-lg bg-red-50 hover:bg-red-100 border border-red-100 transition group">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="w-3 h-3 rounded-full bg-red-500"></span>
+                                <span class="font-bold text-red-700 text-sm">2. 위치 검출 패턴</span>
+                            </div>
+                            <p class="text-xs text-red-600/80 pl-5">카메라가 QR의 위치/방향을 찾는 기준점</p>
+                        </button>
+
+                        <button onclick="simStep(2)" class="w-full text-left p-3 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-100 transition group">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="w-3 h-3 rounded-full bg-blue-500"></span>
+                                <span class="font-bold text-blue-700 text-sm">3. 타이밍 패턴</span>
+                            </div>
+                            <p class="text-xs text-blue-600/80 pl-5">좌표와 크기를 결정하는 기준 눈금</p>
+                        </button>
+
+                        <button onclick="simStep(3)" class="w-full text-left p-3 rounded-lg bg-green-50 hover:bg-green-100 border border-green-100 transition group">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="w-3 h-3 rounded-full bg-green-500"></span>
+                                <span class="font-bold text-green-700 text-sm">4. 데이터 영역</span>
+                            </div>
+                            <p class="text-xs text-green-600/80 pl-5">실제 정보와 오류 복원 코드가 채워짐</p>
+                        </button>
+
+                        <button onclick="simStep(4)" class="w-full text-left p-3 rounded-lg bg-purple-50 hover:bg-purple-100 border border-purple-100 transition group">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="w-3 h-3 rounded-full bg-purple-500"></span>
+                                <span class="font-bold text-purple-700 text-sm">5. 마스킹 (Masking)</span>
+                            </div>
+                            <p class="text-xs text-purple-600/80 pl-5">스캔 오류 방지를 위한 패턴 덮어쓰기</p>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 2. 실습 모드 -->
+                <div>
+                    <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 border-b pb-2">Step 2: 직접 만들기</h2>
+                    <div class="flex flex-col gap-3">
+                        <label class="text-sm text-slate-600">URL이나 메시지 입력:</label>
+                        <input type="text" id="qrInput" placeholder="예: 안녕하세요" 
+                            class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-slate-50"
+                            value="https://www.google.com">
+                        <button onclick="generateRealQR()" class="w-full bg-slate-800 text-white py-3 rounded-lg hover:bg-slate-700 transition font-medium text-sm shadow-lg">
+                            QR 코드 생성하기
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 오른쪽: 시각화 영역 (메인 스테이지) -->
+        <section class="flex-1 bg-slate-100 relative flex flex-col items-center justify-center p-4 overflow-y-auto">
+            
+            <!-- 설명 박스 (상단 고정 느낌) -->
+            <div id="infoBox" class="w-full max-w-xl mb-6 bg-white border-l-4 border-indigo-500 p-5 rounded-r-lg shadow-sm text-slate-600 transition-all duration-300 min-h-[80px] flex items-center flex-shrink-0">
+                <p class="font-bold text-indigo-900 text-sm mb-1 mr-2">👋 환영합니다!</p>
+                <span class="text-sm leading-relaxed">왼쪽 패널의 버튼을 눌러 QR 코드의 생성 원리를 단계별로 확인해보세요.</span>
+            </div>
+
+            <!-- 시각화 그리드 컨테이너 -->
+            <div class="relative w-full flex justify-center items-center flex-col flex-grow min-h-0">
+                
+                <!-- 시뮬레이션 그리드 -->
+                <div id="gridContainer" class="qr-grid shadow-2xl rounded-lg bg-white">
+                    <!-- JS로 셀 생성됨 -->
+                </div>
+
+                <!-- 실제 QR 코드 (평소엔 숨김) -->
+                <div id="realQrContainer" class="hidden flex-col items-center bg-white p-6 rounded-xl shadow-2xl border border-slate-200">
+                    <h3 class="font-bold mb-4 text-slate-800 flex items-center gap-2">
+                        <span>📱 스캔 가능한 실제 코드</span>
+                    </h3>
+                    <div id="qrcode" class="border p-2"></div>
+                    <p class="text-xs text-slate-400 mt-4 text-center">스마트폰 카메라로 스캔해보세요.</p>
+                </div>
+            </div>
+            
+        </section>
+    </main>
+
+    <script>
+        // 전역 설정
+        const GRID_SIZE = 21; // Version 1 QR Code
+        const gridContainer = document.getElementById('gridContainer');
+        const infoBox = document.getElementById('infoBox');
+        let gridCells = [];
+
+        // 초기화 함수
+        function initGrid() {
+            gridContainer.innerHTML = '';
+            gridCells = [];
+            
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.title = `(${x}, ${y})`;
+                    gridContainer.appendChild(cell);
+                    gridCells.push({ element: cell, x, y, type: 'empty', value: 0 });
+                }
+            }
+        }
+
+        function getCell(x, y) {
+            return gridCells[y * GRID_SIZE + x];
+        }
+
+        function setCellType(x, y, type, colorClass) {
+            const cell = getCell(x, y);
+            if (!cell) return;
+            cell.type = type;
+            cell.element.className = `cell ${colorClass} animate-pop`;
+        }
+
+        function drawRect(x, y, w, h, type, colorClass) {
+            for (let i = 0; i < h; i++) {
+                for (let j = 0; j < w; j++) {
+                    setCellType(x + j, y + i, type, colorClass);
+                }
+            }
+        }
+
+        // 패턴 로직
+        function drawFinder(offsetX, offsetY) {
+            drawRect(offsetX, offsetY, 7, 7, 'finder', 'black');
+            drawRect(offsetX + 1, offsetY + 1, 5, 5, 'finder', 'white');
+            drawRect(offsetX + 2, offsetY + 2, 3, 3, 'finder', 'finder'); 
+        }
+
+        function drawTiming() {
+            for (let i = 8; i < GRID_SIZE - 8; i++) {
+                setCellType(i, 6, 'timing', i % 2 === 0 ? 'black' : 'white');
+                getCell(i, 6).element.classList.add('timing');
+                setCellType(6, i, 'timing', i % 2 === 0 ? 'black' : 'white');
+                getCell(6, i).element.classList.add('timing'); 
+            }
+            setCellType(8, GRID_SIZE - 8, 'format', 'black');
+        }
+
+        // 시뮬레이션 단계
+        function simStep(step) {
+            document.getElementById('realQrContainer').classList.add('hidden');
+            gridContainer.classList.remove('hidden');
+
+            initGrid();
+            if (step === 0) {
+                updateInfo("초기화 (Reset)", "21x21 크기의 빈 격자(QR Version 1)가 준비되었습니다.", "text-slate-600", "border-slate-400");
+                return;
+            }
+
+            drawFinder(0, 0); 
+            drawFinder(GRID_SIZE - 7, 0); 
+            drawFinder(0, GRID_SIZE - 7); 
+            
+            if (step === 1) {
+                const icon = `<div class="pattern-icon finder-pattern">
+                                ${Array(49).fill().map((_, i) => {
+                                    const r = Math.floor(i / 7);
+                                    const c = i % 7;
+                                    if ((r >= 1 && r <= 5) && (c >= 1 && c <= 5)) { // Inner white
+                                        if ((r >= 2 && r <= 4) && (c >= 2 && c <= 4)) { // Center black
+                                            return `<div class="dot center-black"></div>`;
+                                        }
+                                        return `<div class="dot inner-white"></div>`;
+                                    }
+                                    return `<div class="dot"></div>`;
+                                }).join('')}
+                              </div>`;
+                updateInfo("1. 위치 검출 패턴 (Finder)", icon + "세 모서리의 큰 사각형은 카메라가 QR 코드의 위치와 회전 방향을 0.1초 만에 찾을 수 있게 해주는 핵심 닻(Anchor)입니다.", "text-red-700", "border-red-500");
+                return;
+            }
+
+            drawTiming();
+            if (step === 2) {
+                const icon = `<div class="pattern-icon timing-pattern">
+                                ${Array(9).fill().map((_, i) => `<div class="dot ${i % 2 === 0 ? 'black' : 'white'}"></div>`).join('')}
+                              </div>`;
+                updateInfo("2. 타이밍 패턴 (Timing)", icon + "흑백이 교차하는 점선은 모눈종이의 눈금 역할을 합니다. QR 코드가 구겨지거나 왜곡되어도 이 눈금을 기준으로 각 셀의 정확한 좌표를 계산합니다.", "text-blue-700", "border-blue-500");
+                return;
+            }
+
+            // Data Fill
+            let dataCount = 0;
+            for (let x = GRID_SIZE - 1; x >= 0; x -= 2) { 
+                if (x === 6) x--; 
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    let checkX = x;
+                    let checkY = y;
+                    let cell1 = getCell(checkX, checkY);
+                    if (cell1.type === 'empty') {
+                        const val = Math.random() > 0.5 ? 1 : 0;
+                        cell1.value = val;
+                        setCellType(checkX, checkY, 'data', val ? 'data' : 'white'); 
+                    }
+                    let cell2 = getCell(checkX - 1, checkY);
+                    if (cell2 && cell2.type === 'empty') {
+                        const val = Math.random() > 0.5 ? 1 : 0;
+                        cell2.value = val;
+                        setCellType(checkX - 1, checkY, 'data', val ? 'data' : 'white');
+                    }
+                }
+            }
+
+            if (step === 3) {
+                const icon = `<div class="pattern-icon" style="grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); width: 26px; height: 26px;">
+                                <div class="dot black"></div><div class="dot white"></div><div class="dot black"></div>
+                                <div class="dot white"></div><div class="dot black"></div><div class="dot white"></div>
+                                <div class="dot black"></div><div class="dot white"></div><div class="dot black"></div>
+                            </div>`;
+                updateInfo("3. 데이터 영역 채우기", icon + "나머지 공간에 데이터를 2열씩 지그재그로 채웁니다. <br>이때 정보뿐만 아니라 QR 코드가 30% 손상되어도 복구할 수 있는 '오류 복원 코드(Reed-Solomon)'도 함께 포함됩니다.", "text-green-700", "border-green-500");
+                return;
+            }
+
+            if (step === 4) {
+                let maskCount = 0;
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    for (let x = 0; x < GRID_SIZE; x++) {
+                        const cell = getCell(x, y);
+                        if (cell.type === 'data') {
+                            if ((x + y) % 2 === 0) { // 예시 마스킹 패턴: 체스판
+                                cell.value = !cell.value;
+                                const colorClass = cell.value ? 'masked' : 'white'; 
+                                cell.element.className = `cell ${cell.type} ${colorClass}`;
+                                maskCount++;
+                            }
+                        }
+                    }
+                }
+
+                // 마스킹 패턴 아이콘 (4x4 체스판 예시)
+                const icon = `<div class="pattern-icon masking-pattern">
+                                ${Array(16).fill().map((_, i) => {
+                                    const row = Math.floor(i / 4);
+                                    const col = i % 4;
+                                    // (row + col) % 2 === 0 이 마스킹 조건이라고 가정 (이전 로직과 동일)
+                                    // 하지만 아이콘은 마스킹 '적용 후' 색상을 보여주므로 원래 데이터가 흰색/검은색일 때 어떻게 바뀌는지 시뮬레이션해야함.
+                                    // 여기서는 그냥 검은색/하얀색을 체스판으로 보여줌.
+                                    return `<div class="dot ${ (row + col) % 2 === 0 ? 'black-mask' : 'white-mask' }"></div>`;
+                                }).join('')}
+                              </div>`;
+
+                updateInfo("4. 마스킹 (Masking)", icon + "데이터가 너무 단순하거나(모두 흰색 등) 패턴이 뭉치면 스캐너가 인식하기 어렵습니다. <br>이를 방지하기 위해 특정 규칙(예: 체스판 무늬)으로 색상을 반전시켜 균형을 맞춥니다.", "text-purple-700", "border-purple-500");
+            }
+        }
+
+        // 설명창 업데이트 헬퍼
+        function updateInfo(title, desc, textColor, borderColor) {
+            infoBox.className = `w-full max-w-xl mb-6 bg-white border-l-4 ${borderColor} p-5 rounded-r-lg shadow-sm text-slate-600 transition-all duration-300 min-h-[80px] flex items-center flex-shrink-0`;
+            infoBox.innerHTML = `<p class="font-bold ${textColor} text-sm mb-1 mr-2">${title}</p><span class="text-sm leading-relaxed">${desc}</span>`;
+        }
+
+        function generateRealQR() {
+            const input = document.getElementById('qrInput').value;
+            const container = document.getElementById('qrcode');
+            const realContainer = document.getElementById('realQrContainer');
+            const simContainer = document.getElementById('gridContainer');
+
+            if (!input) return alert('내용을 입력해주세요.');
+
+            simContainer.classList.add('hidden');
+            realContainer.classList.remove('hidden');
+            realContainer.classList.add('flex');
+            
+            container.innerHTML = ''; 
+
+            new QRCode(container, {
+                text: input,
+                width: 180,
+                height: 180,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+
+            updateInfo("생성 완료", `"${input}" 내용을 담은 실제 QR 코드입니다. <br>스마트폰 카메라로 스캔하여 내용이 정확한지 확인해보세요.`, "text-slate-800", "border-slate-800");
+        }
+
+        initGrid();
+    </script>
+</body>
+</html>
