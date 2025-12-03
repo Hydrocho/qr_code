@@ -137,7 +137,8 @@
     </style>
 </head>
 <!-- 전체 높이 고정 및 스크롤 방지 (내부 스크롤 사용) -->
-<body class="bg-slate-50 text-slate-800 h-screen flex flex-col overflow-hidden">
+<!-- 수정: 모바일에서는 h-screen 제거하고 min-h-screen 및 overflow-auto 허용 -->
+<body class="bg-slate-50 text-slate-800 md:h-screen min-h-screen flex flex-col md:overflow-hidden overflow-y-auto">
 
     <!-- 헤더 -->
     <header class="bg-slate-900 text-white p-3 shadow-md flex-shrink-0 z-20">
@@ -154,7 +155,8 @@
     </header>
 
     <!-- 메인 컨텐츠: 좌우 분할 레이아웃 -->
-    <main class="flex-grow flex flex-col md:flex-row overflow-hidden relative">
+    <!-- 수정: 모바일에서는 overflow-hidden 제거 -->
+    <main class="flex-grow flex flex-col md:flex-row md:overflow-hidden relative">
         
         <!-- 왼쪽: 컨트롤 패널 (사이드바) -->
         <aside class="w-full md:w-[350px] lg:w-[400px] bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 shadow-xl md:shadow-none z-10">
@@ -220,7 +222,8 @@
         </aside>
 
         <!-- 오른쪽: 시각화 영역 (메인 스테이지) -->
-        <section class="flex-1 bg-slate-100 relative flex flex-col items-center justify-center p-4 overflow-y-auto">
+        <!-- 수정: 모바일에서는 overflow-y-auto 대신 자연스럽게 늘어나도록 처리, 최소 높이 확보 -->
+        <section class="flex-1 bg-slate-100 relative flex flex-col items-center justify-center p-4 md:overflow-y-auto min-h-[500px] md:min-h-0">
             
             <!-- 설명 박스 (상단 고정 느낌) -->
             <div id="infoBox" class="w-full max-w-xl mb-6 bg-white border-l-4 border-indigo-500 p-5 rounded-r-lg shadow-sm text-slate-600 transition-all duration-300 min-h-[80px] flex items-center flex-shrink-0">
